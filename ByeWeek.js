@@ -9,6 +9,11 @@ class ByeWeek {
         `${BASE_URL}/?season=${year}&seasonType=${type}`
       );
 
+      // Probably unnecessary as API already returns sorted data by date,
+      // however, could prevent mishaps in the future for the cost
+      // of O(n(log(n))) time
+      seasonData.sort((gameA, gameB) => gameA.week - gameB.week)
+
       // Not the most efficient, but works around problem of
       // Chargers and Rams moving and having new abbreviations
       const teams = new Set();
@@ -43,10 +48,7 @@ class ByeWeek {
   static async populateByeWeeks(seasonData, year, teams) {
     try {
 
-      // Probably unnecessary as API already returns sorted data by date,
-      // however, could prevent mishaps in the future for the cost
-      // of O(n(log(n))) time
-      seasonData.sort((gameA, gameB) => gameA.week - gameB.week)
+      
 
       let teamsNotPlayingThisWeek = new Set(teams);
       let week = 1;
@@ -64,36 +66,10 @@ class ByeWeek {
 
         // Duplication --> Refactor
         if (teamsThatHaveHadBye.has(homeTeamAbbr)) {
-          if (!teamsPointsAfterBye[homeTeamAbbr]) {
-            teamsPointsAfterBye[homeTeamAbbr] = { ...game.score.homeTeamScore, totalGames: 1, otGames: 0 }
-            delete teamsPointsAfterBye[homeTeamAbbr].timeoutsRemaining
-          } else {
-            // Extra step just to be clear and explicit
-            const { pointTotal, pointQ1, pointQ2, pointQ3, pointQ4, pointOT } = game.score.homeTeamScore
-            const gameScoreObj = { pointTotal, pointQ1, pointQ2, pointQ3, pointQ4, pointOT }
-            
-            for (let key in gameScoreObj) {
-              teamsPointsAfterBye[homeTeamAbbr][key] += gameScoreObj[key]
-            }
-          }
-          teamsPointsAfterBye[homeTeamAbbr].totalGames++
-          if (game.score.phase === 'FINAL_OVERTIME') teamsPointsAfterBye[homeTeamAbbr].otGames++
+          this.updatePointsAfterBye(teamsPointsAfterBye, homeTeamAbbr, 'home', game)
         }
         if (teamsThatHaveHadBye.has(visitorTeamAbbr)) {
-          if (!teamsPointsAfterBye[visitorTeamAbbr]) {
-            teamsPointsAfterBye[visitorTeamAbbr] = { ...game.score.visitorTeamScore, totalGames: 1, otGames: 0 }
-            delete teamsPointsAfterBye[visitorTeamAbbr].timeoutsRemaining
-          } else {
-            // Extra step just to be clear and explicit
-            const { pointTotal, pointQ1, pointQ2, pointQ3, pointQ4, pointOT } = game.score.visitorTeamScore
-            const gameScoreObj = { pointTotal, pointQ1, pointQ2, pointQ3, pointQ4, pointOT }
-            
-            for (let key in gameScoreObj) {
-              teamsPointsAfterBye[visitorTeamAbbr][key] += gameScoreObj[key]
-            }
-          }
-          teamsPointsAfterBye[visitorTeamAbbr].totalGames++
-          if (game.score.phase === 'FINAL_OVERTIME') teamsPointsAfterBye[visitorTeamAbbr].otGames++
+          this.updatePointsAfterBye(teamsPointsAfterBye, visitorTeamAbbr, 'away', game)
         }
 
         if (week !== nextGame.week || !nextGame) {
@@ -113,28 +89,48 @@ class ByeWeek {
         }
       }
 
-      // Turn totals into averages
-      for (let team in teamsPointsAfterBye) {
-        for (let pointSum in teamsPointsAfterBye[team]) {
-          if (pointSum === 'pointOT') {
-            teamsPointsAfterBye[team][pointSum] = teamsPointsAfterBye[team][pointSum] / teamsPointsAfterBye[team].otGames
-          } else if (pointSum !== 'totalGames' && pointSum !== 'otGames') {
-            teamsPointsAfterBye[team][pointSum] = teamsPointsAfterBye[team][pointSum] / teamsPointsAfterBye[team].totalGames
-          }
-        }
-        byeId = await db.query(`SELECT id 
-                                FROM bye_weeks 
-                                JOIN teams ON bye_weeks.team_id = teams.id
-                                WHERE season=$1 AND name=$2`, [year, team])
-        const { pointTotal, pointQ1, pointQ2, pointQ3, pointQ4, pointOT } = teamsPointsAfterBye[team]
-        await db.query(`INSERT INTO points_after_bye (bye_week_id, total_avg, first_quarter, second_quarter, third_quarter, fourth_quarter, overtime)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7)`, [byeId.rows[0], pointTotal, pointQ1, pointQ2, pointQ3, pointQ4, pointOT])
-      }
-
+      await this.turnTotalsIntoAverages(teamsPointsAfterBye, year)
 
     } catch (error) {
       throw new Error('ERROR', error);
     }
+  }
+
+  static async turnTotalsIntoAverages(pointObj, year) {
+    for (let team in pointObj) {
+      for (let pointSum in pointObj[team]) {
+        if (pointSum === 'pointOT') {
+          pointObj[team][pointSum] = pointObj[team][pointSum] / pointObj[team].otGames
+        } else if (pointSum !== 'totalGames' && pointSum !== 'otGames') {
+          pointObj[team][pointSum] = pointObj[team][pointSum] / pointObj[team].totalGames
+        }
+      }
+      const byeId = await db.query(`SELECT id 
+                              FROM bye_weeks 
+                              JOIN teams ON bye_weeks.team_id = teams.id
+                              WHERE season=$1 AND name=$2`, [year, team])
+      const { pointTotal, pointQ1, pointQ2, pointQ3, pointQ4, pointOT } = pointObj[team]
+      await db.query(`INSERT INTO points_after_bye (bye_week_id, total_avg, first_quarter, second_quarter, third_quarter, fourth_quarter, overtime)
+                      VALUES ($1, $2, $3, $4, $5, $6, $7)`, [byeId.rows[0], pointTotal, pointQ1, pointQ2, pointQ3, pointQ4, pointOT])
+    }
+  }
+
+  static updatePointsAfterBye(totalPointsObj, teamAbbr, location, game) {
+    const homeOrAway = location === 'home' ? 'homeTeamScore' : 'visitorTeamScore'
+    if (!totalPointsObj[teamAbbr]) {
+      totalPointsObj[teamAbbr] = { ...game.score[homeOrAway], totalGames: 1, otGames: 0 }
+      delete totalPointsObj[teamAbbr].timeoutsRemaining
+    } else {
+      // Extra step just to be clear and explicit
+      const { pointTotal, pointQ1, pointQ2, pointQ3, pointQ4, pointOT } = game.score[homeOrAway]
+      const gameScoreObj = { pointTotal, pointQ1, pointQ2, pointQ3, pointQ4, pointOT }
+      
+      for (let key in gameScoreObj) {
+        totalPointsObj[teamAbbr][key] += gameScoreObj[key]
+      }
+    }
+    totalPointsObj[teamAbbr].totalGames++
+    if (game.score.phase === 'FINAL_OVERTIME') totalPointsObj[teamAbbr].otGames++
   }
 }
 
