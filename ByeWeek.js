@@ -22,7 +22,7 @@ class ByeWeek {
       }
 
       await this.populateFullYears(seasonData, year, type);
-      await this.populateByeWeeks(seasonData, year, teams);
+      await this.calculateByeWeekTotals(seasonData, year, teams);
     } catch (error) {
       throw new Error('ERROR', error);
     }
@@ -45,16 +45,12 @@ class ByeWeek {
     }
   }
 
-  static async populateByeWeeks(seasonData, year, teams) {
+  static async calculateByeWeekTotals(seasonData, year, teams) {
     try {
-
-      
-
       let teamsNotPlayingThisWeek = new Set(teams);
       let week = 1;
       let teamsThatHaveHadBye = new Set()
       let teamsPointsAfterBye = {}
-      let byeId
 
       for (let i = 0; i < seasonData.length; i++) {
         const game = seasonData[i];
@@ -64,7 +60,6 @@ class ByeWeek {
         teamsNotPlayingThisWeek.delete(homeTeamAbbr);
         teamsNotPlayingThisWeek.delete(visitorTeamAbbr);
 
-        // Duplication --> Refactor
         if (teamsThatHaveHadBye.has(homeTeamAbbr)) {
           this.updatePointsAfterBye(teamsPointsAfterBye, homeTeamAbbr, 'home', game)
         }
@@ -75,16 +70,9 @@ class ByeWeek {
         if (week !== nextGame.week || !nextGame) {
           for (let team of teamsNotPlayingThisWeek) {
             teamsThatHaveHadBye.add(team)
-            byeId = await db.query(
-              `INSERT INTO bye_weeks (week, team_id, season) VALUES ($1, $2, $3) RETURNING id`,
-              [week, team, year]
-            );
-            await db.query(
-              `INSERT INTO points_after_bye (bye_week) VALUES ($1)`,
-              [byeId.rows[0]]
-            );
+            await this.updateByeWeeksTable(week, team, year)
           }
-          week = game.week;
+          week = nextGame.week;
           teamsNotPlayingThisWeek = new Set(teams);
         }
       }
@@ -100,19 +88,23 @@ class ByeWeek {
     for (let team in pointObj) {
       for (let pointSum in pointObj[team]) {
         if (pointSum === 'pointOT') {
-          pointObj[team][pointSum] = pointObj[team][pointSum] / pointObj[team].otGames
+          pointObj[team][pointSum] = (pointObj[team][pointSum] / pointObj[team].otGames)
         } else if (pointSum !== 'totalGames' && pointSum !== 'otGames') {
-          pointObj[team][pointSum] = pointObj[team][pointSum] / pointObj[team].totalGames
+          pointObj[team][pointSum] = (pointObj[team][pointSum] / pointObj[team].totalGames)
         }
-      }
-      const byeId = await db.query(`SELECT id 
+      } 
+      this.insertAveragesInDatabase(pointObj[team], year, team)
+    }
+  }
+
+  static async insertAveragesInDatabase(teamsScoreObj, year, team) {
+    const byeId = await db.query(`SELECT id 
                               FROM bye_weeks 
                               JOIN teams ON bye_weeks.team_id = teams.id
                               WHERE season=$1 AND name=$2`, [year, team])
-      const { pointTotal, pointQ1, pointQ2, pointQ3, pointQ4, pointOT } = pointObj[team]
-      await db.query(`INSERT INTO points_after_bye (bye_week_id, total_avg, first_quarter, second_quarter, third_quarter, fourth_quarter, overtime)
+    const { pointTotal, pointQ1, pointQ2, pointQ3, pointQ4, pointOT } = teamsScoreObj
+    await db.query(`INSERT INTO points_after_bye (bye_week_id, total_avg, first_quarter, second_quarter, third_quarter, fourth_quarter, overtime)
                       VALUES ($1, $2, $3, $4, $5, $6, $7)`, [byeId.rows[0], pointTotal, pointQ1, pointQ2, pointQ3, pointQ4, pointOT])
-    }
   }
 
   static updatePointsAfterBye(totalPointsObj, teamAbbr, location, game) {
@@ -131,6 +123,17 @@ class ByeWeek {
     }
     totalPointsObj[teamAbbr].totalGames++
     if (game.score.phase === 'FINAL_OVERTIME') totalPointsObj[teamAbbr].otGames++
+  }
+
+  static async updateByeWeeksTable(week, team, year) {
+    const byeId = await db.query(
+      `INSERT INTO bye_weeks (week, team_id, season) VALUES ($1, $2, $3) RETURNING id`,
+      [week, team, year]
+    );
+    await db.query(
+      `INSERT INTO points_after_bye (bye_week) VALUES ($1)`,
+      [byeId.rows[0]]
+    );
   }
 }
 
