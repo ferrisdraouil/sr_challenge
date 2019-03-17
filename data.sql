@@ -34,8 +34,6 @@ CREATE TABLE bye_weeks (
 
 CREATE TABLE points_after_bye (
   id SERIAL PRIMARY KEY,
-  -- team_id TEXT REFERENCES teams ON DELETE CASCADE,
-  -- season_id INTEGER REFERENCES seasons ON DELETE CASCADE,
   bye_week_id INTEGER REFERENCES bye_weeks ON DELETE CASCADE,
   total_avg FLOAT,
   first_quarter FLOAT,
@@ -91,23 +89,3 @@ INSERT INTO teams (name) VALUES
   ('TB'),
   ('TEN'),
   ('WAS');
-
--- INSERT INTO bye_weeks (week) VALUES
---   (1),
---   (2),
---   (3),
---   (4),
---   (5),
---   (6),
---   (7),
---   (8),
---   (9),
---   (10),
---   (11),
---   (12),
---   (13),
---   (14),
---   (15),
---   (16),
---   (17);
-
