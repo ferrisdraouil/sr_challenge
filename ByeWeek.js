@@ -3,6 +3,49 @@ const db = require('./db');
 const BASE_URL = 'https://api.ngs.nfl.com/league/schedule';
 
 class ByeWeek {
+  static async findByeWeek(teamHandle, year, seasonType) {
+    const result = await db.query(`SELECT bye_weeks.week FROM bye_weeks
+                                    JOIN teams 
+                                      ON teams.id = bye_weeks.team_id
+                                    JOIN seasons 
+                                      ON seasons.id = bye_weeks.season_id
+                                    JOIN full_years
+                                      ON seasons.id = full_years.year_id
+                                    JOIN season_types
+                                      ON full_years.season_type_id = season_types.id
+                                    WHERE teams.name = $1 
+                                      AND season_types.type = $2
+                                      AND seasons.season_year = $3`, [teamHandle, seasonType, year])
+
+    if (result.rows.length === 0) {
+      let notFound = new Error(`No entry for '${teamHandle}' '${year}' '${seasonType}'`);
+      notFound.status = 404;
+      throw notFound;
+    }
+
+    return result.rows
+  }
+
+  static async findPostByeAverageScores(teamHandle, year, period='total_avg') {
+    const result = await db.query(`SELECT points_after_bye.${period} FROM points_after_bye
+                                    JOIN bye_weeks
+                                      ON bye_weeks.id = points_after_bye.bye_week_id
+                                    JOIN teams
+                                      ON teams.id = bye_weeks.team_id
+                                    JOIN seasons
+                                      ON seasons.id = bye_weeks.season_id
+                                    WHERE seasons.season_year = $1
+                                      AND teams.name = $2`, [year, teamHandle])
+
+    if (result.rows.length === 0) {
+      let notFound = new Error(`No entry for '${teamHandle}' '${year}' '${period}'`);
+      notFound.status = 404;
+      throw notFound;
+    }
+
+    return result.rows
+  }
+
   static async loadSeasonData(year, type) {
     try {
       let seasonData = await this.callAPI(BASE_URL, year, type)
@@ -84,19 +127,19 @@ class ByeWeek {
       let teamsThatHaveHadBye = new Set()
   
       for (let i = 0; i < seasonData.length; i++) {
-        const game = seasonData[i];
+        const currentGame = seasonData[i];
         const nextGame = seasonData[i + 1];
-        const { homeTeamAbbr, visitorTeamAbbr } = game
+        const { homeTeamAbbr, visitorTeamAbbr } = currentGame
         
         teamsNotPlayingThisWeek.delete(homeTeamAbbr);
         teamsNotPlayingThisWeek.delete(visitorTeamAbbr);
         
         // Only update final Obj if teams have had bye
         if (teamsThatHaveHadBye.has(homeTeamAbbr)) {
-          this.updatePointsAfterBye(teamsPointsAfterBye, homeTeamAbbr, 'home', game)
+          this.updatePointsAfterBye(teamsPointsAfterBye, homeTeamAbbr, 'home', currentGame)
         }
         if (teamsThatHaveHadBye.has(visitorTeamAbbr)) {
-          this.updatePointsAfterBye(teamsPointsAfterBye, visitorTeamAbbr, 'away', game)
+          this.updatePointsAfterBye(teamsPointsAfterBye, visitorTeamAbbr, 'away', currentGame)
         }
 
         // If last game of the week we add this week's bye teams
@@ -150,7 +193,12 @@ class ByeWeek {
                                     FROM bye_weeks 
                                     JOIN teams ON bye_weeks.team_id = teams.id
                                     WHERE season_id=$1 AND name=$2`, [seasonId.rows[0].id, team])
+      
+      for (let period in teamsScoreObj) {
+        teamsScoreObj[period] = teamsScoreObj[period].toFixed(2)
+      }
       const { pointTotal, pointQ1, pointQ2, pointQ3, pointQ4, pointOT } = teamsScoreObj
+      
       await db.query(`INSERT INTO points_after_bye (bye_week_id, total_avg, first_quarter, second_quarter, third_quarter, fourth_quarter, overtime)
                         VALUES ($1, $2, $3, $4, $5, $6, $7)`, [byeId.rows[0].id, pointTotal, pointQ1, pointQ2, pointQ3, pointQ4, pointOT])
     } catch (error) {
@@ -182,11 +230,17 @@ class ByeWeek {
         `SELECT id FROM seasons WHERE season_year=$1`,
         [year]
       );
-
-      const teamId = await db.query(
+        
+      let teamId = await db.query(
         `SELECT id FROM teams WHERE name=$1`,
         [team]
       );
+      
+      // 2014 Jacksonville went by JAC
+      // Rest of years as JAX
+      if (teamId.rows.length === 0) {
+        teamId = await db.query(`INSERT INTO teams (name) VALUES ($1) RETURNING id`, [team])
+      }
 
       const existingByeInTable = await db.query(`SELECT * FROM bye_weeks WHERE week=$1 AND team_id=$2 AND season_id=$3`, [week, teamId.rows[0].id, seasonId.rows[0].id])
       
@@ -196,10 +250,6 @@ class ByeWeek {
           [week, teamId.rows[0].id, seasonId.rows[0].id]
         );
       }
-      // await db.query(
-      //   `INSERT INTO points_after_bye (bye_week) VALUES ($1)`,
-      //   [byeId.rows[0].id]
-      // );
     } catch (error) {
       console.error('UPDATE BYE WEEKS TABLE ERROR', error);
     }
