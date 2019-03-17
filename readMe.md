@@ -9,7 +9,7 @@ Create database
 
 ```psql -f data.sql```
 
-Use models to seed it
+Use models to seed it from API
 
 ```node seed.js```
 

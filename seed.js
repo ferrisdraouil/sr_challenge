@@ -1,6 +1,7 @@
 const ByeWeek = require('./ByeWeek')
 const db = require('./db');
 
+// Note: Before 2014, this API didnt have game scores
 const years = [2014, 2015, 2016, 2017, 2018]
 const promiseArr = []
 
