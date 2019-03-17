@@ -79,6 +79,11 @@ describe('GET /byeweek', function() {
     expect(miami.statusCode).toBe(200);
     expect(miami.body[0].week).toBe(1);
   });
+
+  test('Throws error with bad info', async function() {
+    const bad = await request(app).get('/byeweek/QRZ/2017');
+    expect(bad.body.status).toBe(404);
+  });
 });
 
 describe('GET /postbyeaverages', function() {

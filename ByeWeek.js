@@ -16,11 +16,10 @@ class ByeWeek {
                                     WHERE teams.name = $1 
                                       AND season_types.type = $2
                                       AND seasons.season_year = $3`, [teamHandle, seasonType, year])
-
     if (result.rows.length === 0) {
       let notFound = new Error(`No entry for '${teamHandle}' '${year}' '${seasonType}'`);
       notFound.status = 404;
-      throw notFound;
+      return notFound;
     }
 
     return result.rows
