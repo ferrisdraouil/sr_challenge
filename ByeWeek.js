@@ -61,14 +61,14 @@ class ByeWeek {
         teams.add(game.homeTeamAbbr);
       }
 
-      await this.populateFullYears(seasonData, year, type);
+      await this.populateFullYears(year, type);
       await this.calculateByeWeekStats(seasonData, year, teams);
     } catch (error) {
       console.error('LOAD SEASON DATA ERROR', error);
     }
   }
 
-  static async populateFullYears(seasonData, year, type) {
+  static async populateFullYears(year, type) {
     try {
       // Check if year exists in seasons table
       let existingYear = await db.query(`SELECT id FROM seasons WHERE season_year=$1`, [year])
@@ -103,7 +103,7 @@ class ByeWeek {
 
   static async calculateByeWeekStats(seasonData, year, teams) {
     try {
-      let teamsPointsAfterBye = await this.calculatePostByePointTotals(seasonData, teams, year)
+      const teamsPointsAfterBye = await this.calculatePostByePointTotals(seasonData, teams, year)
 
       await this.turnTotalsIntoAverages(teamsPointsAfterBye, year)
 
